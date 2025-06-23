@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from 'react';
 import { GameState, PlayerStats, Inventory, Enemy, Weapon, Armor, ChestReward, Research, Achievement, CollectionBook, KnowledgeStreak, GameMode, Statistics, PowerSkills } from '../types/game';
 import { generateWeapon, generateArmor, generateEnemy, generateMythicalWeapon, generateMythicalArmor, calculateResearchBonus, calculateResearchCost } from '../utils/gameUtils';
 import { checkAchievements, initializeAchievements } from '../utils/achievements';
+import { useAuth } from './useAuth';
+import { useQuestions } from './useQuestions';
 import AsyncStorage from '../utils/storage';
 
 const STORAGE_KEY = 'hugoland_game_state';
@@ -103,11 +105,20 @@ const initialGameState: GameState = {
   gameMode: initialGameMode,
   statistics: initialStatistics,
   powerSkills: initialPowerSkills,
+  cheats: {
+    infiniteCoins: false,
+    infiniteGems: false,
+    obtainAnyItem: false,
+  },
 };
 
 export const useGameState = () => {
+  const { user, profile, updateProfile } = useAuth();
+  const { getQuestionByZone, recordAnswer } = useQuestions();
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+  const [questionStartTime, setQuestionStartTime] = useState<number>(0);
   const [visualEffects, setVisualEffects] = useState({
     showFloatingText: false,
     floatingText: '',
@@ -156,6 +167,7 @@ export const useGameState = () => {
             research: parsedState.research || initialResearch,
             isPremium: parsedState.isPremium || parsedState.zone >= 50,
             powerSkills: parsedState.powerSkills || initialPowerSkills,
+            cheats: parsedState.cheats || initialGameState.cheats,
           });
         }
       } catch (error) {
@@ -167,6 +179,28 @@ export const useGameState = () => {
 
     loadGameState();
   }, []);
+
+  // Sync with profile when available
+  useEffect(() => {
+    if (profile && !isLoading) {
+      setGameState(prev => ({
+        ...prev,
+        coins: profile.coins,
+        gems: profile.gems,
+        zone: profile.zone,
+        research: {
+          level: profile.research_level,
+          tier: profile.research_tier,
+          totalSpent: prev.research.totalSpent,
+        },
+        gameMode: {
+          ...prev.gameMode,
+          current: profile.game_mode as any,
+        },
+        isPremium: profile.is_premium,
+      }));
+    }
+  }, [profile, isLoading]);
 
   // Save game state to storage whenever it changes
   useEffect(() => {
@@ -188,6 +222,34 @@ export const useGameState = () => {
       saveGameState();
     }
   }, [gameState, isLoading]);
+
+  // Sync important data to Supabase profile
+  useEffect(() => {
+    if (user && profile && !isLoading) {
+      const syncToProfile = async () => {
+        try {
+          await updateProfile({
+            zone: gameState.zone,
+            coins: gameState.coins,
+            gems: gameState.gems,
+            research_level: gameState.research.level,
+            research_tier: gameState.research.tier,
+            game_mode: gameState.gameMode.current,
+            is_premium: gameState.isPremium,
+            best_streak: gameState.knowledgeStreak.best,
+            highest_zone: Math.max(profile.highest_zone, gameState.zone),
+            total_items_collected: gameState.collectionBook.totalWeaponsFound + gameState.collectionBook.totalArmorFound,
+          });
+        } catch (error) {
+          console.error('Error syncing to profile:', error);
+        }
+      };
+
+      // Debounce the sync to avoid too many updates
+      const timeoutId = setTimeout(syncToProfile, 2000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [gameState.zone, gameState.coins, gameState.gems, gameState.research.level, gameState.isPremium, user, profile, updateProfile, isLoading]);
 
   const triggerVisualEffect = useCallback((type: 'text' | 'particles' | 'shake', data?: any) => {
     switch (type) {
@@ -415,7 +477,7 @@ export const useGameState = () => {
   const upgradeWeapon = useCallback((weaponId: string) => {
     setGameState(prev => {
       const weapon = prev.inventory.weapons.find(w => w.id === weaponId);
-      if (!weapon || prev.gems < weapon.upgradeCost) return prev;
+      if (!weapon || (prev.gems < weapon.upgradeCost && !prev.cheats.infiniteGems)) return prev;
 
       const updatedWeapons = prev.inventory.weapons.map(w =>
         w.id === weaponId
@@ -431,7 +493,7 @@ export const useGameState = () => {
 
       return {
         ...prev,
-        gems: prev.gems - weapon.upgradeCost,
+        gems: prev.cheats.infiniteGems ? prev.gems : prev.gems - weapon.upgradeCost,
         inventory: {
           ...prev.inventory,
           weapons: updatedWeapons,
@@ -445,7 +507,7 @@ export const useGameState = () => {
   const upgradeArmor = useCallback((armorId: string) => {
     setGameState(prev => {
       const armor = prev.inventory.armor.find(a => a.id === armorId);
-      if (!armor || prev.gems < armor.upgradeCost) return prev;
+      if (!armor || (prev.gems < armor.upgradeCost && !prev.cheats.infiniteGems)) return prev;
 
       const updatedArmor = prev.inventory.armor.map(a =>
         a.id === armorId
@@ -461,7 +523,7 @@ export const useGameState = () => {
 
       return {
         ...prev,
-        gems: prev.gems - armor.upgradeCost,
+        gems: prev.cheats.infiniteGems ? prev.gems : prev.gems - armor.upgradeCost,
         inventory: {
           ...prev.inventory,
           armor: updatedArmor,
@@ -507,7 +569,7 @@ export const useGameState = () => {
   const upgradeResearch = useCallback(() => {
     const researchCost = calculateResearchCost(gameState.research.level, gameState.research.tier);
     setGameState(prev => {
-      if (prev.coins < researchCost) return prev;
+      if (prev.coins < researchCost && !prev.cheats.infiniteCoins) return prev;
 
       const newLevel = prev.research.level + 1;
       const newTier = Math.floor(newLevel / 10);
@@ -518,7 +580,7 @@ export const useGameState = () => {
 
       return {
         ...prev,
-        coins: prev.coins - researchCost,
+        coins: prev.cheats.infiniteCoins ? prev.coins : prev.coins - researchCost,
         research: {
           level: newLevel,
           tier: newTier,
@@ -528,10 +590,10 @@ export const useGameState = () => {
     });
     updatePlayerStats();
     checkAndUnlockAchievements();
-  }, [gameState.research.level, gameState.research.tier, updatePlayerStats, triggerVisualEffect, checkAndUnlockAchievements]);
+  }, [gameState.research.level, gameState.research.tier, gameState.cheats.infiniteCoins, updatePlayerStats, triggerVisualEffect, checkAndUnlockAchievements]);
 
   const openChest = useCallback((chestCost: number): ChestReward | null => {
-    if (gameState.coins < chestCost) return null;
+    if (gameState.coins < chestCost && !gameState.cheats.infiniteCoins) return null;
 
     const numItems = Math.floor(Math.random() * 2) + 2;
     const bonusGems = Math.floor(Math.random() * 10) + 5;
@@ -555,7 +617,7 @@ export const useGameState = () => {
 
     setGameState(prev => ({
       ...prev,
-      coins: prev.coins - chestCost,
+      coins: prev.cheats.infiniteCoins ? prev.coins : prev.coins - chestCost,
       gems: prev.gems + finalBonusGems,
       inventory: {
         ...prev.inventory,
@@ -572,11 +634,11 @@ export const useGameState = () => {
     checkAndUnlockAchievements();
 
     return chestReward;
-  }, [gameState.coins, gameState.knowledgeStreak.multiplier, updateCollectionBook, checkAndUnlockAchievements]);
+  }, [gameState.coins, gameState.knowledgeStreak.multiplier, gameState.cheats.infiniteCoins, updateCollectionBook, checkAndUnlockAchievements]);
 
   const purchaseMythical = useCallback((): { item: Weapon | Armor; type: 'weapon' | 'armor' } | null => {
     const MYTHICAL_COST = 10000;
-    if (gameState.coins < MYTHICAL_COST) return null;
+    if (gameState.coins < MYTHICAL_COST && !gameState.cheats.infiniteCoins) return null;
 
     const isWeapon = Math.random() < 0.5;
     const item = isWeapon ? generateMythicalWeapon() : generateMythicalArmor();
@@ -586,7 +648,7 @@ export const useGameState = () => {
 
     setGameState(prev => ({
       ...prev,
-      coins: prev.coins - MYTHICAL_COST,
+      coins: prev.cheats.infiniteCoins ? prev.coins : prev.coins - MYTHICAL_COST,
       inventory: {
         ...prev.inventory,
         weapons: isWeapon ? [...prev.inventory.weapons, item as Weapon] : prev.inventory.weapons,
@@ -602,7 +664,7 @@ export const useGameState = () => {
     checkAndUnlockAchievements();
 
     return { item, type };
-  }, [gameState.coins, updateCollectionBook, triggerVisualEffect, checkAndUnlockAchievements]);
+  }, [gameState.coins, gameState.cheats.infiniteCoins, updateCollectionBook, triggerVisualEffect, checkAndUnlockAchievements]);
 
   const startCombat = useCallback(() => {
     let enemy = generateEnemy(gameState.zone);
@@ -617,6 +679,11 @@ export const useGameState = () => {
         def: enemy.def * 2,
       };
     }
+
+    // Get question for this zone
+    const question = getQuestionByZone(gameState.zone);
+    setCurrentQuestion(question);
+    setQuestionStartTime(Date.now());
     
     setGameState(prev => ({
       ...prev,
@@ -629,15 +696,28 @@ export const useGameState = () => {
       combatLog: [`You encounter a ${enemy.name} in Zone ${enemy.zone}!`],
       powerSkills: initialPowerSkills, // Reset power skills for new combat
     }));
-  }, [gameState.zone, gameState.gameMode.current]);
+  }, [gameState.zone, gameState.gameMode.current, getQuestionByZone]);
 
-  const attack = useCallback((hit: boolean, category?: string) => {
+  const attack = useCallback((hit: boolean, answerGiven?: number) => {
     setGameState(prev => {
-      if (!prev.currentEnemy || !prev.inCombat) return prev;
+      if (!prev.currentEnemy || !prev.inCombat || !currentQuestion) return prev;
+
+      // Record answer analytics
+      if (user && answerGiven !== undefined) {
+        const responseTime = Date.now() - questionStartTime;
+        recordAnswer(
+          currentQuestion.question_id,
+          answerGiven,
+          hit,
+          responseTime,
+          prev.zone,
+          prev.gameMode.current
+        );
+      }
 
       // Update statistics and streaks
-      if (category) {
-        updateStatistics(category, hit);
+      if (currentQuestion) {
+        updateStatistics(currentQuestion.category, hit);
       }
       updateKnowledgeStreak(hit);
 
@@ -778,6 +858,11 @@ export const useGameState = () => {
           const newZone = prev.zone + 1;
           const newIsPremium = newZone >= 50;
           
+          // Get next question
+          const nextQuestion = getQuestionByZone(newZone);
+          setCurrentQuestion(nextQuestion);
+          setQuestionStartTime(Date.now());
+          
           return {
             ...prev,
             coins: prev.coins + coinsEarned,
@@ -797,6 +882,7 @@ export const useGameState = () => {
           };
         } else {
           // Handle defeat
+          setCurrentQuestion(null);
           return {
             ...prev,
             currentEnemy: null,
@@ -806,6 +892,11 @@ export const useGameState = () => {
             powerSkills: initialPowerSkills, // Reset power skills after defeat
           };
         }
+      } else {
+        // Get next question for continuing combat
+        const nextQuestion = getQuestionByZone(prev.zone);
+        setCurrentQuestion(nextQuestion);
+        setQuestionStartTime(Date.now());
       }
 
       return {
@@ -819,7 +910,7 @@ export const useGameState = () => {
 
     // Check achievements after combat
     setTimeout(checkAndUnlockAchievements, 100);
-  }, [updateStatistics, updateKnowledgeStreak, triggerVisualEffect, checkAndUnlockAchievements]);
+  }, [currentQuestion, questionStartTime, user, recordAnswer, updateStatistics, updateKnowledgeStreak, triggerVisualEffect, checkAndUnlockAchievements, getQuestionByZone]);
 
   const resetGame = useCallback(async () => {
     try {
@@ -832,15 +923,47 @@ export const useGameState = () => {
           sessionStartTime: new Date(),
         },
       });
+      setCurrentQuestion(null);
     } catch (error) {
       console.error('Error resetting game:', error);
     }
   }, []);
 
+  const toggleCheat = useCallback((cheat: keyof typeof gameState.cheats) => {
+    setGameState(prev => ({
+      ...prev,
+      cheats: {
+        ...prev.cheats,
+        [cheat]: !prev.cheats[cheat],
+      },
+    }));
+  }, []);
+
+  const generateCheatItem = useCallback(() => {
+    if (!gameState.cheats.obtainAnyItem) return;
+
+    const isWeapon = Math.random() < 0.5;
+    const item = isWeapon ? generateMythicalWeapon() : generateMythicalArmor();
+    
+    updateCollectionBook(item);
+
+    setGameState(prev => ({
+      ...prev,
+      inventory: {
+        ...prev.inventory,
+        weapons: isWeapon ? [...prev.inventory.weapons, item as Weapon] : prev.inventory.weapons,
+        armor: !isWeapon ? [...prev.inventory.armor, item as Armor] : prev.inventory.armor,
+      },
+    }));
+
+    triggerVisualEffect('text', { text: 'Cheat Item Generated!', color: 'text-purple-400' });
+  }, [gameState.cheats.obtainAnyItem, updateCollectionBook, triggerVisualEffect]);
+
   return {
     gameState,
     isLoading,
     visualEffects,
+    currentQuestion,
     clearVisualEffect,
     equipWeapon,
     equipArmor,
@@ -855,6 +978,8 @@ export const useGameState = () => {
     attack,
     resetGame,
     setGameMode,
+    toggleCheat,
+    generateCheatItem,
     checkAndUnlockAchievements,
   };
 };

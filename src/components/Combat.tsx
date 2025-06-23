@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Enemy, PowerSkills } from '../types/game';
 import { Sword, Shield, Heart, Brain, Clock, Zap, Skull, Flame, Droplets, Plus } from 'lucide-react';
-import { TriviaQuestion, getQuestionByZone } from '../utils/triviaQuestions';
 
 interface CombatProps {
   enemy: Enemy;
@@ -11,7 +10,8 @@ interface CombatProps {
     atk: number;
     def: number;
   };
-  onAttack: (hit: boolean, category?: string) => void;
+  currentQuestion: any;
+  onAttack: (hit: boolean, answerGiven?: number) => void;
   combatLog: string[];
   gameMode: {
     current: 'normal' | 'blitz' | 'bloodlust' | 'crazy';
@@ -30,13 +30,13 @@ interface CombatProps {
 export const Combat: React.FC<CombatProps> = ({ 
   enemy, 
   playerStats, 
+  currentQuestion,
   onAttack, 
   combatLog, 
   gameMode,
   knowledgeStreak,
   powerSkills 
 }) => {
-  const [currentQuestion, setCurrentQuestion] = useState<TriviaQuestion | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [isAnswering, setIsAnswering] = useState(false);
   const [timeLeft, setTimeLeft] = useState(5);
@@ -46,13 +46,14 @@ export const Combat: React.FC<CombatProps> = ({
   const questionTime = (gameMode.current === 'blitz' || gameMode.current === 'bloodlust') ? 3 : 5;
 
   useEffect(() => {
-    const question = getQuestionByZone(enemy.zone);
-    setCurrentQuestion(question);
-    setSelectedAnswer(null);
-    setTimeLeft(questionTime);
-    setShowResult(false);
-    setLastAnswerCorrect(null);
-  }, [enemy, questionTime]);
+    if (currentQuestion) {
+      setSelectedAnswer(null);
+      setTimeLeft(questionTime);
+      setShowResult(false);
+      setLastAnswerCorrect(null);
+      setIsAnswering(false);
+    }
+  }, [currentQuestion, questionTime]);
 
   useEffect(() => {
     if (!currentQuestion || isAnswering || showResult) return;
@@ -76,18 +77,13 @@ export const Combat: React.FC<CombatProps> = ({
     setIsAnswering(true);
     setSelectedAnswer(answerIndex);
 
-    const isCorrect = answerIndex === currentQuestion.correctAnswer;
+    const isCorrect = answerIndex === currentQuestion.correct_answer;
     setLastAnswerCorrect(isCorrect);
     setShowResult(true);
 
     setTimeout(() => {
-      onAttack(isCorrect, currentQuestion.category);
-      
-      const newQuestion = getQuestionByZone(enemy.zone);
-      setCurrentQuestion(newQuestion);
-      setSelectedAnswer(null);
+      onAttack(isCorrect, answerIndex);
       setIsAnswering(false);
-      setTimeLeft(questionTime);
       setShowResult(false);
       setLastAnswerCorrect(null);
     }, 2000);
@@ -304,13 +300,13 @@ export const Combat: React.FC<CombatProps> = ({
 
           {/* Answer Options */}
           <div className="grid grid-cols-1 gap-2 sm:gap-3">
-            {currentQuestion.options.map((option, index) => {
+            {currentQuestion.options.map((option: string, index: number) => {
               let buttonClass = 'bg-gray-700 hover:bg-gray-600 text-white';
               
               if (showResult) {
-                if (index === currentQuestion.correctAnswer) {
+                if (index === currentQuestion.correct_answer) {
                   buttonClass = 'bg-green-600 text-white';
-                } else if (index === selectedAnswer && selectedAnswer !== currentQuestion.correctAnswer) {
+                } else if (index === selectedAnswer && selectedAnswer !== currentQuestion.correct_answer) {
                   buttonClass = 'bg-red-600 text-white';
                 } else {
                   buttonClass = 'bg-gray-600 text-gray-400';
@@ -352,7 +348,7 @@ export const Combat: React.FC<CombatProps> = ({
             </p>
             {!lastAnswerCorrect && (
               <p className="text-gray-300 text-xs sm:text-sm mt-1">
-                Correct answer: {String.fromCharCode(65 + currentQuestion.correctAnswer)}. {currentQuestion.options[currentQuestion.correctAnswer]}
+                Correct answer: {String.fromCharCode(65 + currentQuestion.correct_answer)}. {currentQuestion.options[currentQuestion.correct_answer]}
               </p>
             )}
           </div>

@@ -164,3 +164,14 @@ export interface CheatSettings {
   infiniteGems: boolean;
   obtainAnyItem: boolean;
 }
+
+// Supabase-specific types
+export interface TriviaQuestion {
+  id: string;
+  question_id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  category: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+}

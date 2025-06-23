@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useAuth } from './hooks/useAuth';
 import { useGameState } from './hooks/useGameState';
+import { Auth } from './components/Auth';
 import { Combat } from './components/Combat';
 import { Shop } from './components/Shop';
 import { Inventory } from './components/Inventory';
@@ -12,17 +14,22 @@ import { GameModeSelector } from './components/GameModeSelector';
 import { PokyegMarket } from './components/PokyegMarket';
 import { Tutorial } from './components/Tutorial';
 import { CheatPanel } from './components/CheatPanel';
+import { Chat } from './components/Chat';
+import { Leaderboards } from './components/Leaderboards';
+import { GiftSystem } from './components/GiftSystem';
 import { FloatingText, ScreenShake } from './components/VisualEffects';
-import { Shield, Package, User, Play, RotateCcw, Brain, Crown, Trophy, Book, BarChart3, Settings } from 'lucide-react';
+import { Shield, Package, User, Play, RotateCcw, Brain, Crown, Trophy, Book, BarChart3, Settings, MessageCircle, Gift } from 'lucide-react';
 
 type GameView = 'stats' | 'shop' | 'inventory' | 'research';
-type ModalView = 'achievements' | 'collection' | 'statistics' | 'gameMode' | 'pokyegMarket' | 'tutorial' | 'cheats' | null;
+type ModalView = 'achievements' | 'collection' | 'statistics' | 'gameMode' | 'pokyegMarket' | 'tutorial' | 'cheats' | 'chat' | 'leaderboards' | 'gifts' | null;
 
 function App() {
+  const { user, profile, loading: authLoading } = useAuth();
   const {
     gameState,
     isLoading,
     visualEffects,
+    currentQuestion,
     clearVisualEffect,
     equipWeapon,
     equipArmor,
@@ -43,6 +50,11 @@ function App() {
 
   const [currentView, setCurrentView] = useState<GameView>('stats');
   const [currentModal, setCurrentModal] = useState<ModalView>(null);
+
+  // Show auth screen if not authenticated
+  if (authLoading || !user || !profile) {
+    return <Auth />;
+  }
 
   if (isLoading) {
     return (
@@ -66,6 +78,7 @@ function App() {
         <Combat
           enemy={gameState.currentEnemy}
           playerStats={gameState.playerStats}
+          currentQuestion={currentQuestion}
           onAttack={attack}
           combatLog={gameState.combatLog}
           gameMode={gameState.gameMode}
@@ -85,22 +98,6 @@ function App() {
               coins={gameState.coins}
               gems={gameState.gems}
             />
-            
-            {/* AFK Gem Info */}
-            <div className="bg-gradient-to-r from-purple-900 to-indigo-900 p-4 rounded-lg border border-purple-500/50">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <span className="text-2xl">💎</span>
-                  <h3 className="text-purple-400 font-bold text-lg">AFK Gem Mining</h3>
-                </div>
-                <p className="text-white text-sm">
-                  Earn 2 gems every minute while the game is open!
-                </p>
-                <p className="text-purple-300 text-sm">
-                  Keep Hugoland running to passively collect gems
-                </p>
-              </div>
-            </div>
             
             {/* Knowledge Streak Display */}
             {gameState.knowledgeStreak.current > 0 && (
@@ -257,6 +254,25 @@ function App() {
             onClose={() => setCurrentModal(null)}
           />
         );
+      case 'chat':
+        return (
+          <Chat
+            isOpen={true}
+            onClose={() => setCurrentModal(null)}
+          />
+        );
+      case 'leaderboards':
+        return (
+          <Leaderboards
+            onClose={() => setCurrentModal(null)}
+          />
+        );
+      case 'gifts':
+        return (
+          <GiftSystem
+            onClose={() => setCurrentModal(null)}
+          />
+        );
       default:
         return null;
     }
@@ -293,6 +309,13 @@ function App() {
             )}
           </div>
           
+          {/* User Info */}
+          <div className="text-center mb-4">
+            <p className="text-purple-300 text-sm">
+              Welcome back, <span className="font-bold text-white">{profile.username}</span>!
+            </p>
+          </div>
+          
           {/* Quick Stats Bar */}
           <div className="flex justify-center items-center gap-4 mb-4 text-sm">
             <button
@@ -317,6 +340,30 @@ function App() {
             >
               <BarChart3 className="w-4 h-4" />
               <span>{Math.round((gameState.statistics.correctAnswers / Math.max(gameState.statistics.totalQuestionsAnswered, 1)) * 100)}%</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentModal('chat')}
+              className="flex items-center gap-1 text-green-300 hover:text-green-200 transition-colors"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>Chat</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentModal('leaderboards')}
+              className="flex items-center gap-1 text-orange-300 hover:text-orange-200 transition-colors"
+            >
+              <Crown className="w-4 h-4" />
+              <span>Ranks</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentModal('gifts')}
+              className="flex items-center gap-1 text-pink-300 hover:text-pink-200 transition-colors"
+            >
+              <Gift className="w-4 h-4" />
+              <span>Gifts</span>
             </button>
           </div>
           
